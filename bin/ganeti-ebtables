@@ -1,0 +1,115 @@
+#!/bin/sh
+#
+# Copyright (C) 2013 Cyril Bouthors <cyril@boutho.rs>
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
+set -e -o nounset
+
+# Add 'sbin' to $PATH to allow us to run ebtables
+export PATH=$PATH:/sbin:/usr/sbin
+
+# Check if ebtables is available
+if ! which ebtables >/dev/null 2>&1
+then
+    echo "$0: ebtables is not available" >&2
+    exit 1
+fi
+
+# Check if environment is correctly set
+if [ -z "$GANETI_INSTANCE_NAME" -o -z "$HOOKS_PHASE" -o -z "$OP_CODE" ]
+then
+    echo "$0: Ganeti environment not properly defined, we need:" >&2
+    echo " - GANETI_INSTANCE_NAME" >&2
+    echo " - HOOKS_PHASE" >&2
+    echo " - OP_CODE" >&2
+    exit 1
+fi
+
+# Handle hooks
+case "$HOOKS_PHASE/$OP_CODE" in
+    instance-failover/PRE|instance-migrate/PRE|instance-move/PRE)
+	manage_rule $GANETI_INSTANCE_SECONDARY add
+	;;
+
+    instance-failover/POST|instance-migrate/POST|instance-move/POST)
+	manage_rule $GANETI_INSTANCE_SECONDARY remove
+	;;
+
+    instance-remove/POST|instance-stop/POST)
+	manage_rule $GANETI_INSTANCE_PRIMARY remove
+	;;
+
+    instance-start/PRE)
+	manage_rule $GANETI_INSTANCE_PRIMARY add
+	;;
+esac
+
+manage_rule()
+{
+    hostname="$1"
+    action="$2"
+
+    # Check hostname
+    if [ "$hostname" != "$(hostname -f)" ]
+    then
+	echo "$0 is not supposed to run for this operation on this machine" >&2
+	echo "Hook phase: $HOOKS_PHASE" >&2
+	echo "Operation: $OP_CODE" >&2
+	echo "Primary: $GANETI_INSTANCE_PRIMARY" >&2
+	echo "Secondary: $GANETI_INSTANCE_SECONDARY" >&2
+	exit 0
+    fi
+
+    for file in /var/run/ganeti/kvm-hypervisor/nic/$GANETI_INSTANCE_NAME/*
+    do
+	[ ! -f $file ] && continue
+
+	# Fetch interface name
+	read interface_name < $file
+	if [ -z "$interface_name" ]
+	then
+            echo "$0: interface name not found for $GANETI_INSTANCE_NAME" >&2
+            exit 1
+	fi
+
+	# Fetch MAC address
+	interface_id=$(basename $file)
+	mac_address=$(eval echo \$GANETI_INSTANCE_NIC${interface_id}_MAC)
+	if [ -z "$mac_address" ]
+	then
+            echo "$0: unable to fetch MAC address for $GANETI_INSTANCE_NAME" >&2
+            exit 1
+	fi
+
+	# Prepare ebtables command
+	ebtables_command='-D'
+	if [ "$action" = 'add' ]
+	then
+	    ebtables_command='-A'
+	fi
+
+	# Debug
+	echo "$0: $action ebtables"
+	echo "$0: instance $GANETI_INSTANCE_NAME"
+	echo "$0: NIC $interface_name"
+	echo "$0: MAC address $mac_address"
+
+	# Manage ebtable rule
+	ebtables $ebtables_command INPUT -i $interface_name ! -s $mac_address \
+	    --log --log-ip --log-ip6 --log-arp \
+	    --log-prefix "$0 ($GANETI_INSTANCE_NAME)" -j DROP
+
+    done
+}

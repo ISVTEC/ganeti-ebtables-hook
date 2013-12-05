@@ -1,0 +1,5 @@
+ganeti-ebtables-hook (1.0-1) unstable; urgency=low
+
+  * Initial release
+
+ -- Cyril Bouthors <cyril@bouthors.org>  Thu, 05 Dec 2013 13:41:35 +0100

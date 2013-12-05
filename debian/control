@@ -1,0 +1,14 @@
+Source: ganeti-ebtables-hook
+Section: admin
+Priority: optional
+Maintainer: Cyril Bouthors <cyb@debian.org>
+Uploaders: Cyril Bouthors <cyril@boutho.rs>, Cyril Bouthors <cyril@bouthors.org>
+Build-Depends: debhelper (>= 5)
+Standards-Version: 3.9.4
+
+Package: ganeti-ebtables-hook
+Architecture: all
+Depends: ganeti2, ebtables, ${misc:Depends}
+Description: Prevent MAC spoofing from Ganeti instances by managing ebtables rules
+ Set of Ganeti hooks to manage ebtables rules to prevent MAC address spoofing
+ from instances
