@@ -36,4 +36,4 @@ install: $(HOOKS:%=$(DESTDIR)/etc/ganeti/hooks/%/ganeti-ebtables)
 
 $(DESTDIR)/etc/ganeti/hooks/%/ganeti-ebtables:
 	mkdir -p $(@D)
-	ln -s $(DESTDIR)/usr/bin/ganeti-ebtables $@
+	ln -s /usr/bin/ganeti-ebtables $@

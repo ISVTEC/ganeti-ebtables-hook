@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Copyright (C) 2013 Cyril Bouthors <cyril@boutho.rs>
 #
@@ -15,64 +15,26 @@
 # this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-set -e -o nounset
-
-# Add 'sbin' to $PATH to allow us to run ebtables
-export PATH=$PATH:/sbin:/usr/sbin
-
-# Check if ebtables is available
-if ! which ebtables >/dev/null 2>&1
-then
-    echo "$0: ebtables is not available" >&2
-    exit 1
-fi
-
-# Check if environment is correctly set
-if [ -z "$GANETI_INSTANCE_NAME" -o -z "$HOOKS_PHASE" -o -z "$OP_CODE" ]
-then
-    echo "$0: Ganeti environment not properly defined, we need:" >&2
-    echo " - GANETI_INSTANCE_NAME" >&2
-    echo " - HOOKS_PHASE" >&2
-    echo " - OP_CODE" >&2
-    exit 1
-fi
-
-# Handle hooks
-case "$HOOKS_PHASE/$OP_CODE" in
-    instance-failover/PRE|instance-migrate/PRE|instance-move/PRE)
-	manage_rule $GANETI_INSTANCE_SECONDARY add
-	;;
-
-    instance-failover/POST|instance-migrate/POST|instance-move/POST)
-	manage_rule $GANETI_INSTANCE_SECONDARY remove
-	;;
-
-    instance-remove/POST|instance-stop/POST)
-	manage_rule $GANETI_INSTANCE_PRIMARY remove
-	;;
-
-    instance-start/PRE)
-	manage_rule $GANETI_INSTANCE_PRIMARY add
-	;;
-esac
+set -e
 
 manage_rule()
 {
     hostname="$1"
-    action="$2"
+    instance="$2"
+    action="$3"
 
     # Check hostname
     if [ "$hostname" != "$(hostname -f)" ]
     then
 	echo "$0 is not supposed to run for this operation on this machine" >&2
-	echo "Hook phase: $HOOKS_PHASE" >&2
-	echo "Operation: $OP_CODE" >&2
+	echo "Hook phase: $GANETI_HOOKS_PHASE" >&2
+	echo "Operation: $GANETI_OP_CODE" >&2
 	echo "Primary: $GANETI_INSTANCE_PRIMARY" >&2
 	echo "Secondary: $GANETI_INSTANCE_SECONDARY" >&2
 	exit 0
     fi
 
-    for file in /var/run/ganeti/kvm-hypervisor/nic/$GANETI_INSTANCE_NAME/*
+    for file in /var/run/ganeti/kvm-hypervisor/nic/$instance/*
     do
 	[ ! -f $file ] && continue
 
@@ -80,7 +42,7 @@ manage_rule()
 	read interface_name < $file
 	if [ -z "$interface_name" ]
 	then
-            echo "$0: interface name not found for $GANETI_INSTANCE_NAME" >&2
+            echo "$0: interface name not found for $instance" >&2
             exit 1
 	fi
 
@@ -89,7 +51,7 @@ manage_rule()
 	mac_address=$(eval echo \$GANETI_INSTANCE_NIC${interface_id}_MAC)
 	if [ -z "$mac_address" ]
 	then
-            echo "$0: unable to fetch MAC address for $GANETI_INSTANCE_NAME" >&2
+            echo "$0: unable to fetch MAC address for $instance" >&2
             exit 1
 	fi
 
@@ -102,14 +64,58 @@ manage_rule()
 
 	# Debug
 	echo "$0: $action ebtables"
-	echo "$0: instance $GANETI_INSTANCE_NAME"
+	echo "$0: instance $instance"
 	echo "$0: NIC $interface_name"
 	echo "$0: MAC address $mac_address"
 
 	# Manage ebtable rule
 	ebtables $ebtables_command INPUT -i $interface_name ! -s $mac_address \
 	    --log --log-ip --log-ip6 --log-arp \
-	    --log-prefix "$0 ($GANETI_INSTANCE_NAME)" -j DROP
+	    --log-prefix "$0 ($instance)" -j DROP
 
     done
 }
+
+# Add 'sbin' to $PATH to allow us to run ebtables
+export PATH=$PATH:/sbin:/usr/sbin
+
+# Check if ebtables is available
+if ! which ebtables >/dev/null 2>&1
+then
+    echo "$0: ebtables is not available" >&2
+    exit 1
+fi
+
+# Check if environment is correctly set
+if [ -z "$GANETI_INSTANCE_NAME" -o -z "$GANETI_HOOKS_PHASE" -o \
+    -z "$GANETI_OP_CODE" ]
+then
+    echo "$0: Ganeti environment not properly defined, we need:" >&2
+    echo " - GANETI_INSTANCE_NAME" >&2
+    echo " - GANETI_HOOKS_PHASE" >&2
+    echo " - GANETI_OP_CODE" >&2
+    echo "Dumping environment:" >&2
+    env >&2
+    exit 1
+fi
+
+set -o nounset
+
+# Handle hooks
+case "$GANETI_OP_CODE/$GANETI_HOOKS_PHASE" in
+    OP_INSTANCE_FAILOVER/pre|OP_INSTANCE_MIGRATE/pre|OP_INSTANCE_MOVE/pre)
+	manage_rule $GANETI_INSTANCE_SECONDARY $GANETI_INSTANCE_NAME add
+	;;
+
+    OP_INSTANCE_FAILOVER/post|OP_INSTANCE_MIGRATE/post|OP_INSTANCE_MOVE/post)
+	manage_rule $GANETI_INSTANCE_SECONDARY $GANETI_INSTANCE_NAME remove
+	;;
+
+    OP_INSTANCE_REMOVE/post|OP_INSTANCE_SHUTDOWN/post)
+	manage_rule $GANETI_INSTANCE_PRIMARY $GANETI_INSTANCE_NAME remove
+	;;
+
+    OP_INSTANCE_STARTUP/pre|OP_INSTANCE_STARTUP/post)
+	manage_rule $GANETI_INSTANCE_PRIMARY $GANETI_INSTANCE_NAME add
+	;;
+esac
